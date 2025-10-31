@@ -1,14 +1,25 @@
 #!/bin/bash
 set -e
 
+export HOME="${HOME:-/root}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading configuration from $ENV_FILE"
+    set -a
+    source "$ENV_FILE"
+    set +a
+else
+    echo "Error: .env file not found at $ENV_FILE"
+    exit 1
+fi
+
 echo "=================================="
 echo "APT RAG System - Cloud GPU Setup"
 echo "=================================="
 echo ""
-
-REPO_URL="${REPO_URL:-https://github.com/YOUR_USERNAME/YOUR_REPO.git}"
-WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace/apt-rag}"
-HF_TOKEN="${HF_TOKEN:-}"
 
 echo "Step 1: Installing system dependencies..."
 apt-get update -qq

@@ -154,19 +154,33 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed guide.
 
 ### Quick Deploy
 
-1. Push to GitHub
-2. Create GPU instance with startup script:
+1. Configure deployment:
    ```bash
-   export REPO_URL="https://github.com/YOUR_USERNAME/YOUR_REPO.git"
-   export HF_TOKEN="hf_xxxxx"
-   curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/deploy/startup.sh | bash
+   cd deploy
+   cp .env.template .env
+   # Edit .env with your settings
    ```
-3. SSH and run pipeline:
+
+2. Push to GitHub:
    ```bash
+   git add deploy/.env
+   git commit -m "Add deployment config"
+   git push
+   ```
+
+3. On VPS, run setup:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git /workspace/apt-rag
    cd /workspace/apt-rag
+   sudo bash deploy/startup.sh
+   ```
+
+4. Run pipeline:
+   ```bash
    bash deploy/run_pipeline.sh
    ```
-4. Download results:
+
+5. Test RAG queries, then download:
    ```bash
    bash deploy/download_results.sh
    scp user@host:/workspace/apt-rag/rag_outputs_*.tar.gz .
