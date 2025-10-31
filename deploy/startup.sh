@@ -71,7 +71,7 @@ if [ -n "$SUDO_USER" ]; then
     fi
 
     echo "Installing Python dependencies..."
-    sudo -u $SUDO_USER bash -c "cd $WORKSPACE_DIR && export PATH=\"$ACTUAL_HOME/.cargo/bin:\$PATH\" && uv sync"
+    sudo -u $SUDO_USER bash -c "source $ACTUAL_HOME/.cargo/env && cd $WORKSPACE_DIR && uv sync"
 else
     if ! command -v uv &> /dev/null; then
         curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1
