@@ -1,14 +1,16 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
 import pickle
-from pathlib import Path
-from datetime import datetime
+import sys
 import time
+from datetime import datetime
+from pathlib import Path
+
 import typer
 from loguru import logger
 from typing_extensions import Annotated
 
-from apt.ingest import load_pdfs, chunk_documents
 from apt.config import Config
+from apt.ingest import load_pdfs, chunk_documents
 
 app = typer.Typer()
 

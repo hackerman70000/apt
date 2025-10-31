@@ -64,8 +64,13 @@ class PDFLoader:
         all_documents = []
         success_count = 0
         fail_count = 0
+        total_files = len(pdf_files)
 
-        for pdf_path in pdf_files:
+        for i, pdf_path in enumerate(pdf_files, 1):
+            # Log progress every 10 files or for the first 5 files
+            if i <= 5 or i % 10 == 0 or i == total_files:
+                logger.info(f"Processing {i}/{total_files}: {pdf_path.name}")
+
             documents = self.load_pdf(pdf_path)
             if documents:
                 all_documents.extend(documents)

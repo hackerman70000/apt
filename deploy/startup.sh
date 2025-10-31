@@ -73,10 +73,10 @@ echo ""
 
 echo "Step 4: Setting up Python environment..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 
 echo "Installing Python dependencies..."
-"$HOME/.cargo/bin/uv" sync
+"$HOME/.local/bin/uv" sync
 echo "Python environment ready"
 echo ""
 

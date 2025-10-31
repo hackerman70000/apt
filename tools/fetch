@@ -1,9 +1,11 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
 import hashlib
 import json
 import csv
+import subprocess
+import asyncio
 from pathlib import Path
-import requests
+import aiohttp
 import typer
 from bs4 import BeautifulSoup
 from loguru import logger
@@ -32,54 +34,58 @@ def report_already_downloaded(download_path: Path) -> bool:
         return True
     return False
 
-def download_report(report: dict, output_base: Path) -> bool:
+async def download_report(session: aiohttp.ClientSession, report: dict, output_base: Path, semaphore: asyncio.Semaphore) -> tuple[str, bool]:
     report_year = str(report['Year'])
     report_filename = report['Filename']
     report_link = report['Link']
     report_sha1 = report['SHA-1']
 
-    try:
-        year_dir = output_base / report_year
-        year_dir.mkdir(parents=True, exist_ok=True)
+    async with semaphore:
+        try:
+            year_dir = output_base / report_year
+            year_dir.mkdir(parents=True, exist_ok=True)
 
-        download_path = year_dir / report_filename
+            download_path = year_dir / report_filename
 
-        if report_already_downloaded(download_path):
-            logger.debug(f"File {report_filename} already exists")
-            return True
+            if report_already_downloaded(download_path):
+                return ('skip', True)
 
-        logger.info(f"Downloading {report_filename} ({report_year})")
+            logger.info(f"Downloading {report_filename} ({report_year})")
 
-        report_splash = requests.get(report_link, timeout=30).text
-        file_url = get_download_url(report_splash)
+            # Get the splash page to extract download URL
+            async with session.get(report_link, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                report_splash = await resp.text()
 
-        hash_check = hashlib.sha1()
+            file_url = get_download_url(report_splash)
 
-        report_file = requests.get(file_url, stream=True, timeout=60)
-        report_file.raise_for_status()
+            hash_check = hashlib.sha1()
 
-        with open(download_path, 'wb') as f:
-            for chunk in report_file.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    hash_check.update(chunk)
+            # Download the actual file
+            async with session.get(file_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                resp.raise_for_status()
 
-        if hash_check.hexdigest() != report_sha1:
-            download_path.unlink()
-            raise ValueError(f"SHA-1 mismatch for {report_filename}")
+                with open(download_path, 'wb') as f:
+                    async for chunk in resp.content.iter_chunked(8192):
+                        if chunk:
+                            f.write(chunk)
+                            hash_check.update(chunk)
 
-        if not download_path.suffix:
-            pdf_path = download_path.with_suffix('.pdf')
-            download_path.rename(pdf_path)
-            logger.success(f"Downloaded: {pdf_path.name}")
-        else:
-            logger.success(f"Downloaded: {download_path.name}")
+            if hash_check.hexdigest() != report_sha1:
+                download_path.unlink()
+                raise ValueError(f"SHA-1 mismatch for {report_filename}")
 
-        return True
+            if not download_path.suffix:
+                pdf_path = download_path.with_suffix('.pdf')
+                download_path.rename(pdf_path)
+                logger.success(f"Downloaded: {pdf_path.name}")
+            else:
+                logger.success(f"Downloaded: {download_path.name}")
 
-    except Exception as e:
-        logger.error(f"Failed to download {report_filename}: {e}")
-        return False
+            return ('success', True)
+
+        except Exception as e:
+            logger.error(f"Failed to download {report_filename}: {e}")
+            return ('fail', False)
 
 def load_reports_from_csv(csv_path: Path) -> list:
     reports = []
@@ -91,10 +97,62 @@ def load_reports_from_csv(csv_path: Path) -> list:
     reports.reverse()
     return reports
 
+def setup_aptnotes_repo(data_dir: Path) -> bool:
+    """Clone APTnotes repository and create symlink if needed."""
+    aptnotes_dir = data_dir / "aptnotes_data"
+
+    # Clone repository if it doesn't exist
+    if not aptnotes_dir.exists():
+        logger.info("APTnotes repository not found, cloning from GitHub...")
+        try:
+            subprocess.run(
+                ["git", "clone", "https://github.com/aptnotes/data", str(aptnotes_dir)],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            logger.success(f"APTnotes repository cloned to {aptnotes_dir}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to clone APTnotes repository: {e.stderr}")
+            return False
+
+    # Create symlink from APTnotes_summary.csv to APTnotes.csv
+    csv_summary = aptnotes_dir / "APTnotes_summary.csv"
+    csv_link = aptnotes_dir / "APTnotes.csv"
+
+    if csv_summary.exists() and not csv_link.exists():
+        logger.info("Creating symlink for APTnotes.csv")
+        csv_link.symlink_to("APTnotes_summary.csv")
+
+    return True
+
+async def download_all(reports: list, output: Path, concurrent: int = 10):
+    """Download all reports concurrently."""
+    semaphore = asyncio.Semaphore(concurrent)
+    success_count = 0
+    skip_count = 0
+    fail_count = 0
+
+    connector = aiohttp.TCPConnector(limit=concurrent)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = [download_report(session, report, output, semaphore) for report in reports]
+
+        for coro in asyncio.as_completed(tasks):
+            result, _ = await coro
+            if result == 'success':
+                success_count += 1
+            elif result == 'skip':
+                skip_count += 1
+            else:
+                fail_count += 1
+
+    return success_count, skip_count, fail_count
+
 @app.command()
 def main(
     csv_path: Annotated[Path, typer.Option(help="Path to APTnotes.csv")] = None,
     output: Annotated[Path, typer.Option(help="Output directory")] = None,
+    concurrent: Annotated[int, typer.Option(help="Number of concurrent downloads")] = 10,
 ):
     logger.info("Starting APTnotes report download from Box.com")
 
@@ -103,6 +161,13 @@ def main(
 
     if output is None:
         output = Config.REPORTS_DIR / "aptnotes_pdfs"
+
+    # Setup APTnotes repository if needed
+    if not csv_path.exists():
+        logger.info("APTnotes data not found, setting up repository...")
+        if not setup_aptnotes_repo(Config.REPORTS_DIR):
+            logger.error("Failed to setup APTnotes repository")
+            raise typer.Exit(code=1)
 
     if not csv_path.exists():
         logger.error(f"CSV file not found: {csv_path}")
@@ -114,22 +179,8 @@ def main(
     reports = load_reports_from_csv(csv_path)
     logger.info(f"Found {len(reports)} reports to process")
 
-    logger.info("Starting downloads (newest first)")
-    success_count = 0
-    skip_count = 0
-    fail_count = 0
-
-    for i, report in enumerate(reports, 1):
-        logger.info(f"Progress: {i}/{len(reports)}")
-
-        if report_already_downloaded(output / str(report['Year']) / report['Filename']):
-            skip_count += 1
-            continue
-
-        if download_report(report, output):
-            success_count += 1
-        else:
-            fail_count += 1
+    logger.info(f"Starting downloads with {concurrent} concurrent connections")
+    success_count, skip_count, fail_count = asyncio.run(download_all(reports, output, concurrent))
 
     logger.success("Download complete")
     logger.info(f"Downloaded: {success_count}")
