@@ -43,27 +43,48 @@ ollama pull gemma3n:e4b
 echo "Model ready"
 echo ""
 
-echo "Step 3: Cloning repository..."
+echo "Step 3: Setting up repository..."
 if [ -d "$WORKSPACE_DIR" ]; then
-    echo "Directory $WORKSPACE_DIR already exists, skipping clone"
+    echo "Directory $WORKSPACE_DIR already exists, pulling latest changes"
+    cd "$WORKSPACE_DIR"
+    git pull
 else
     git clone "$REPO_URL" "$WORKSPACE_DIR"
+    cd "$WORKSPACE_DIR"
     echo "Repository cloned to $WORKSPACE_DIR"
 fi
-cd "$WORKSPACE_DIR"
+
+if [ -n "$SUDO_USER" ]; then
+    chown -R $SUDO_USER:$SUDO_USER "$WORKSPACE_DIR"
+    echo "Ownership set to $SUDO_USER"
+fi
 echo ""
 
 echo "Step 4: Setting up Python environment..."
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1
-    echo "uv installed"
+
+if [ -n "$SUDO_USER" ]; then
+    ACTUAL_HOME=$(eval echo ~$SUDO_USER)
+
+    if ! sudo -u $SUDO_USER command -v uv &> /dev/null; then
+        sudo -u $SUDO_USER bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' > /dev/null 2>&1
+        echo "uv installed for $SUDO_USER"
+    fi
+
+    echo "Installing Python dependencies..."
+    sudo -u $SUDO_USER bash -c "cd $WORKSPACE_DIR && export PATH=\"$ACTUAL_HOME/.cargo/bin:\$PATH\" && uv sync"
+else
+    if ! command -v uv &> /dev/null; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1
+        echo "uv installed"
+    fi
+
+    export PATH="$HOME/.cargo/bin:$PATH"
+    source "$HOME/.cargo/env" 2>/dev/null || true
+
+    echo "Installing Python dependencies..."
+    uv sync
 fi
 
-export PATH="$HOME/.cargo/bin:$PATH"
-source "$HOME/.cargo/env" 2>/dev/null || true
-
-echo "Installing Python dependencies..."
-uv sync
 echo "Python environment ready"
 echo ""
 
