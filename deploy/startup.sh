@@ -56,11 +56,11 @@ echo ""
 echo "Step 4: Setting up Python environment..."
 if ! command -v uv &> /dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1
-    export PATH="$HOME/.cargo/bin:$PATH"
     echo "uv installed"
-else
-    echo "uv already installed"
 fi
+
+export PATH="$HOME/.cargo/bin:$PATH"
+source "$HOME/.cargo/env" 2>/dev/null || true
 
 echo "Installing Python dependencies..."
 uv sync
