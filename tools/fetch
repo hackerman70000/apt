@@ -1,0 +1,141 @@
+#!/usr/bin/env -S uv run
+import hashlib
+import json
+import csv
+from pathlib import Path
+import requests
+import typer
+from bs4 import BeautifulSoup
+from loguru import logger
+from typing_extensions import Annotated
+
+from apt.config import Config
+
+app = typer.Typer()
+
+def get_download_url(page: str) -> str:
+    soup = BeautifulSoup(page, 'lxml')
+    scripts = soup.find('body').find_all('script')
+    sections = scripts[-1].contents[0].split(';')
+    app_api = json.loads(sections[0].split('=')[1])['/app-api/enduserapp/shared-item']
+
+    box_url = "https://app.box.com/index.php"
+    box_args = "?rm=box_download_shared_file&shared_name={}&file_id={}"
+    file_url = box_url + box_args.format(app_api['sharedName'], f"f_{app_api['itemID']}")
+
+    return file_url
+
+def report_already_downloaded(download_path: Path) -> bool:
+    if download_path.exists():
+        return True
+    if download_path.with_suffix('.pdf').exists():
+        return True
+    return False
+
+def download_report(report: dict, output_base: Path) -> bool:
+    report_year = str(report['Year'])
+    report_filename = report['Filename']
+    report_link = report['Link']
+    report_sha1 = report['SHA-1']
+
+    try:
+        year_dir = output_base / report_year
+        year_dir.mkdir(parents=True, exist_ok=True)
+
+        download_path = year_dir / report_filename
+
+        if report_already_downloaded(download_path):
+            logger.debug(f"File {report_filename} already exists")
+            return True
+
+        logger.info(f"Downloading {report_filename} ({report_year})")
+
+        report_splash = requests.get(report_link, timeout=30).text
+        file_url = get_download_url(report_splash)
+
+        hash_check = hashlib.sha1()
+
+        report_file = requests.get(file_url, stream=True, timeout=60)
+        report_file.raise_for_status()
+
+        with open(download_path, 'wb') as f:
+            for chunk in report_file.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    hash_check.update(chunk)
+
+        if hash_check.hexdigest() != report_sha1:
+            download_path.unlink()
+            raise ValueError(f"SHA-1 mismatch for {report_filename}")
+
+        if not download_path.suffix:
+            pdf_path = download_path.with_suffix('.pdf')
+            download_path.rename(pdf_path)
+            logger.success(f"Downloaded: {pdf_path.name}")
+        else:
+            logger.success(f"Downloaded: {download_path.name}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to download {report_filename}: {e}")
+        return False
+
+def load_reports_from_csv(csv_path: Path) -> list:
+    reports = []
+    with open(csv_path, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            reports.append(row)
+
+    reports.reverse()
+    return reports
+
+@app.command()
+def main(
+    csv_path: Annotated[Path, typer.Option(help="Path to APTnotes.csv")] = None,
+    output: Annotated[Path, typer.Option(help="Output directory")] = None,
+):
+    logger.info("Starting APTnotes report download from Box.com")
+
+    if csv_path is None:
+        csv_path = Config.REPORTS_DIR / "aptnotes_data" / "APTnotes.csv"
+
+    if output is None:
+        output = Config.REPORTS_DIR / "aptnotes_pdfs"
+
+    if not csv_path.exists():
+        logger.error(f"CSV file not found: {csv_path}")
+        raise typer.Exit(code=1)
+
+    output.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Loading reports from {csv_path}")
+    reports = load_reports_from_csv(csv_path)
+    logger.info(f"Found {len(reports)} reports to process")
+
+    logger.info("Starting downloads (newest first)")
+    success_count = 0
+    skip_count = 0
+    fail_count = 0
+
+    for i, report in enumerate(reports, 1):
+        logger.info(f"Progress: {i}/{len(reports)}")
+
+        if report_already_downloaded(output / str(report['Year']) / report['Filename']):
+            skip_count += 1
+            continue
+
+        if download_report(report, output):
+            success_count += 1
+        else:
+            fail_count += 1
+
+    logger.success("Download complete")
+    logger.info(f"Downloaded: {success_count}")
+    logger.info(f"Skipped: {skip_count}")
+    logger.info(f"Failed: {fail_count}")
+    logger.info(f"Total: {len(reports)}")
+
+if __name__ == "__main__":
+    app()

@@ -1,0 +1,58 @@
+#!/usr/bin/env -S uv run
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from loguru import logger
+from typing_extensions import Annotated
+
+from apt.store import ChromaManager
+from apt.retrieval import create_rag_chain
+
+app = typer.Typer()
+console = Console()
+
+@app.command()
+def main(
+    question: Annotated[str, typer.Argument(help="Your question to the RAG system")],
+    model: Annotated[str, typer.Option(help="Ollama model to use")] = "gemma3n:e4b",
+):
+    logger.info("Loading ChromaDB vectorstore")
+    chroma_manager = ChromaManager()
+    vectorstore = chroma_manager.load_vectorstore()
+
+    stats = chroma_manager.get_collection_stats()
+    logger.info(f"Loaded collection with {stats['document_count']} documents")
+
+    logger.info(f"Creating RAG chain with model: {model}")
+    rag_chain = create_rag_chain(vectorstore, llm_model=model)
+
+    logger.info(f"Question: {question}")
+    result = rag_chain.query(question)
+
+    console.print()
+    console.print(Panel(f"[bold cyan]{question}[/bold cyan]", title="Question", border_style="cyan"))
+    console.print()
+    console.print(Panel(result["answer"], title="Answer", border_style="green"))
+    console.print()
+
+    console.print(f"[bold]Sources:[/bold] {result['num_sources']} documents")
+    console.print()
+
+    for i, doc in enumerate(result["source_documents"], 1):
+        filename = doc.metadata.get('filename', 'Unknown')
+        year = doc.metadata.get('year', 'N/A')
+        console.print(f"[bold cyan][{i}][/bold cyan] {filename}")
+        console.print(f"    Year: {year}")
+
+        if "apt_groups_mentioned" in doc.metadata:
+            groups = doc.metadata['apt_groups_mentioned']
+            console.print(f"    APT Groups: {groups}")
+
+        if "techniques_mentioned" in doc.metadata:
+            techniques = doc.metadata['techniques_mentioned']
+            console.print(f"    Techniques: {techniques}")
+
+        console.print()
+
+if __name__ == "__main__":
+    app()

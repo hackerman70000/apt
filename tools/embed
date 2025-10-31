@@ -1,0 +1,109 @@
+#!/usr/bin/env -S uv run
+import sys
+import pickle
+from pathlib import Path
+from datetime import datetime
+import time
+import typer
+from loguru import logger
+from typing_extensions import Annotated
+
+from apt.store import ChromaManager
+from apt.config import Config
+
+app = typer.Typer()
+
+def setup_logging(model_name: str):
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+        level="INFO"
+    )
+    log_dir = Config.DATA_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        log_dir / f"embedding_{model_name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        level="DEBUG"
+    )
+
+@app.command()
+def main(
+    model: Annotated[str, typer.Option(help="Embedding model to use")] = Config.EMBEDDING_MODEL,
+    collection: Annotated[str, typer.Option(help="Collection name")] = None,
+    input_file: Annotated[Path, typer.Option("--input", help="Input pickle file")] = None,
+):
+    setup_logging(model)
+    start_time = time.time()
+
+    logger.info("Embedding Creation Pipeline")
+    logger.info(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Embedding model: {model}")
+
+    if input_file is None:
+        input_file = Config.PROCESSED_DATA / "chunked_documents.pkl"
+
+    if not input_file.exists():
+        logger.error(f"Input file not found: {input_file}")
+        logger.error("Run: tools/extract first")
+        raise typer.Exit(code=1)
+
+    logger.info("STEP 1/3: Loading pre-processed chunks")
+    logger.info(f"Loading from: {input_file}")
+
+    load_start = time.time()
+    with open(input_file, 'rb') as f:
+        chunks = pickle.load(f)
+    load_time = time.time() - load_start
+
+    file_size_mb = input_file.stat().st_size / (1024 * 1024)
+    logger.success(f"Loaded {len(chunks):,} chunks in {load_time:.2f}s ({file_size_mb:.1f} MB)")
+
+    logger.info("STEP 2/3: Initializing embedding model")
+    logger.info(f"Model: {model}")
+
+    if collection is None:
+        collection = f"apt_reports_{model.replace('/', '_').replace('-', '_')}"
+
+    logger.info(f"Collection: {collection}")
+
+    model_start = time.time()
+    chroma_manager = ChromaManager(
+        collection_name=collection,
+        embedding_model=model
+    )
+    model_time = time.time() - model_start
+
+    logger.success(f"Model initialized in {model_time:.2f}s")
+
+    logger.info("STEP 3/3: Creating vectorstore and computing embeddings")
+    logger.warning(f"Computing embeddings for {len(chunks):,} chunks")
+    logger.warning("Expected time: 10-40 minutes depending on hardware")
+
+    embed_start = time.time()
+    chroma_manager.create_vectorstore(chunks)
+    embed_time = time.time() - embed_start
+
+    logger.success(f"Vectorstore created in {embed_time/60:.1f} minutes")
+
+    stats = chroma_manager.get_collection_stats()
+    logger.info(f"Stored {stats['document_count']:,} documents")
+
+    logger.info("Running test query")
+    test_results = chroma_manager.similarity_search("APT28 spearphishing", k=3)
+    logger.info(f"Retrieved {len(test_results)} results")
+
+    total_time = time.time() - start_time
+
+    logger.info("Statistics:")
+    logger.info(f"  Documents:    {stats['document_count']:,}")
+    logger.info(f"  Collection:   {collection}")
+    logger.info(f"  Model:        {model}")
+    logger.info(f"  Total Time:   {total_time/60:.1f} minutes")
+
+    logger.success("Embedding creation complete")
+    logger.info("RAG system is ready for queries!")
+
+if __name__ == "__main__":
+    app()

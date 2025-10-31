@@ -1,0 +1,51 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories
+data/
+
+# Large report repositories
+data/reports/APT_REPORT/
+data/reports/APTnotes/
+data/reports/APT_CyberCriminal_Campagin_Collections/
+
+# TensorBoard
+**/tensorboard_logs/
+
+# Large data files
+*.json.gz
+*.csv.gz
+*.pkl
+*.pickle
+
+# Logs
+logs/
+*.log
+
+# Experiments
+experiments/
+
+# ChromaDB
+**/chroma_db/
+htmlcov/
+.coverage
