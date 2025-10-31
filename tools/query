@@ -15,9 +15,19 @@ console = Console()
 def main(
     question: Annotated[str, typer.Argument(help="Your question to the RAG system")],
     model: Annotated[str, typer.Option(help="Ollama model to use")] = "gemma3n:e4b",
+    collection: Annotated[str, typer.Option(help="Collection name")] = None,
+    embedding_model: Annotated[str, typer.Option(help="Embedding model used")] = None,
 ):
-    logger.info("Loading ChromaDB vectorstore")
-    chroma_manager = ChromaManager()
+    # Determine collection name based on embedding model
+    if embedding_model is None:
+        from apt.config import Config
+        embedding_model = Config.EMBEDDING_MODEL
+
+    if collection is None:
+        collection = f"apt_reports_{embedding_model.replace('/', '_').replace('-', '_')}"
+
+    logger.info(f"Loading ChromaDB vectorstore with collection: {collection}")
+    chroma_manager = ChromaManager(collection_name=collection, embedding_model=embedding_model)
     vectorstore = chroma_manager.load_vectorstore()
 
     stats = chroma_manager.get_collection_stats()

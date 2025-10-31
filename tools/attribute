@@ -1,0 +1,133 @@
+#!/usr/bin/env -S uv run --script
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from loguru import logger
+from typing_extensions import Annotated
+
+from apt.store import ChromaManager
+from apt.config import Config
+
+app = typer.Typer()
+console = Console()
+
+ATTRIBUTION_PROMPT = """Based on the following threat intelligence reports, analyze this observed activity and provide threat actor attribution.
+
+Observed Activity:
+{description}
+
+Context from similar reports:
+{context}
+
+Provide a structured attribution analysis with:
+1. Most Likely Threat Actor(s) - with confidence level (High/Medium/Low)
+2. Matching TTPs - specific techniques that match
+3. Similar Campaigns - past campaigns with similar patterns
+4. Key Indicators - what makes this attribution likely
+5. Alternative Possibilities - other groups that could match
+
+Format your response clearly with sections.
+"""
+
+@app.command()
+def main(
+    description: Annotated[str, typer.Argument(help="Description of observed malicious activity")],
+    model: Annotated[str, typer.Option(help="Ollama model to use")] = "gemma3n:e4b",
+    k: Annotated[int, typer.Option(help="Number of similar reports to retrieve")] = 10,
+    collection: Annotated[str, typer.Option(help="Collection name")] = None,
+    embedding_model: Annotated[str, typer.Option(help="Embedding model used")] = None,
+):
+    """
+    Threat Actor Attribution Tool
+
+    Analyzes observed malicious activity and suggests possible threat actor attribution
+    based on historical APT reports.
+
+    Example:
+        tools/attribute "Spear phishing emails with macro-enabled documents targeting government agencies"
+    """
+
+    console.print("\n[bold cyan]APT Threat Actor Attribution System[/bold cyan]\n")
+
+    # Determine collection name
+    if embedding_model is None:
+        embedding_model = Config.EMBEDDING_MODEL
+
+    if collection is None:
+        collection = f"apt_reports_{embedding_model.replace('/', '_').replace('-', '_')}"
+
+    logger.info(f"Loading ChromaDB vectorstore with collection: {collection}")
+    chroma_manager = ChromaManager(collection_name=collection, embedding_model=embedding_model)
+    vectorstore = chroma_manager.load_vectorstore()
+
+    stats = chroma_manager.get_collection_stats()
+    logger.info(f"Loaded collection with {stats['document_count']} documents")
+
+    # Search for similar reports
+    console.print("[yellow]Searching for similar threat patterns...[/yellow]")
+    logger.info(f"Searching for {k} similar reports")
+
+    similar_docs = vectorstore.similarity_search(description, k=k)
+    logger.info(f"Found {len(similar_docs)} relevant documents")
+
+    # Build context from similar reports
+    context_parts = []
+    for i, doc in enumerate(similar_docs, 1):
+        filename = doc.metadata.get('filename', 'Unknown')
+        year = doc.metadata.get('year', 'N/A')
+        content = doc.page_content[:800]  # More context for attribution
+
+        context_parts.append(
+            f"[Report {i}] {filename} ({year})\n{content}...\n"
+        )
+
+    context = "\n---\n".join(context_parts)
+
+    # Generate attribution using LLM
+    console.print("[yellow]Analyzing patterns and generating attribution...[/yellow]")
+    logger.info("Sending to LLM for attribution analysis")
+
+    from langchain_ollama import OllamaLLM
+    llm = OllamaLLM(model=model)
+
+    prompt = ATTRIBUTION_PROMPT.format(description=description, context=context)
+    attribution = llm.invoke(prompt)
+
+    logger.success("Attribution analysis complete")
+
+    # Display results
+    console.print()
+    console.print(Panel(
+        f"[bold]{description}[/bold]",
+        title="Observed Activity",
+        border_style="cyan"
+    ))
+    console.print()
+
+    console.print(Panel(
+        attribution,
+        title="Attribution Analysis",
+        border_style="green"
+    ))
+    console.print()
+
+    # Show similar reports table
+    table = Table(title=f"Top {len(similar_docs)} Similar Reports", show_lines=True)
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Report", style="white")
+    table.add_column("Year", style="yellow", width=6)
+    table.add_column("Preview", style="dim")
+
+    for i, doc in enumerate(similar_docs, 1):
+        filename = doc.metadata.get('filename', 'Unknown')
+        year = str(doc.metadata.get('year', 'N/A'))
+        preview = doc.page_content[:150].replace('\n', ' ')
+
+        table.add_row(str(i), filename, year, preview + "...")
+
+    console.print(table)
+    console.print()
+
+if __name__ == "__main__":
+    app()

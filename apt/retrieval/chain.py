@@ -64,7 +64,13 @@ class RAGChain:
         docs = self.retriever.invoke(question)
         logger.info(f"Retrieved {len(docs)} relevant documents")
 
+        # Calculate total context size
+        total_chars = sum(len(doc.page_content) for doc in docs)
+        logger.info(f"Total context size: {total_chars:,} characters")
+
+        logger.info("Sending query to LLM (this may take 30-60 seconds)...")
         answer = self.chain.invoke(question)
+        logger.success("LLM response received")
 
         return {
             "question": question,
