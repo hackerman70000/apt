@@ -26,7 +26,7 @@ if [ -d "data/reports/aptnotes_pdfs" ] && [ "$(ls -A data/reports/aptnotes_pdfs)
 else
     echo "Downloading reports from APTnotes..."
     tools/fetch
-    echo "✓ Reports downloaded"
+    echo "Reports downloaded"
 fi
 echo ""
 
@@ -37,33 +37,39 @@ if [ -f "data/processed/chunked_documents.pkl" ]; then
     echo "To re-extract, delete: data/processed/chunked_documents.pkl"
 else
     tools/extract
-    echo "✓ Extraction complete"
+    echo "Extraction complete"
 fi
 echo ""
 
 echo "Step 3/3: Creating Vector Embeddings..."
 echo "--------------------------------------"
-echo "This may take 20-40 minutes on GPU..."
+echo "This may take 30-60 minutes on GPU"
 tools/embed --model "$EMBEDDING_MODEL"
-echo "✓ Embeddings created"
+echo "Embeddings created"
 echo ""
 
 echo "=================================="
-echo "Pipeline Complete! 🎉"
+echo "Pipeline Complete"
 echo "=================================="
 echo "End Time: $(date)"
 echo ""
 echo "Output Files:"
 echo "  - Vector DB: data/chroma_db/"
 echo "  - Chunks: data/processed/chunked_documents.pkl"
-echo "  - Logs: logs/"
+echo "  - Logs: data/logs/"
 echo ""
 echo "Vector DB Size:"
 du -sh data/chroma_db/ 2>/dev/null || echo "  Not yet created"
 echo ""
-echo "Test the system:"
-echo "  tools/query 'Which APT group uses HrServ webshell?'"
+echo "=================================="
+echo "Test RAG System"
+echo "=================================="
 echo ""
-echo "To download results to local machine:"
+echo "Run test queries:"
+echo "  tools/query 'Which APT group uses HrServ webshell?'"
+echo "  tools/query 'What are the TTPs of APT28?'"
+echo "  tools/query 'Show me spearphishing campaigns from 2023'"
+echo ""
+echo "After testing, download results to local machine:"
 echo "  bash deploy/download_results.sh"
 echo ""

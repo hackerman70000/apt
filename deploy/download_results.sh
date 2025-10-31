@@ -19,12 +19,12 @@ echo ""
 tar -czf "$OUTPUT_FILE" \
     data/chroma_db/ \
     data/processed/chunked_documents.pkl \
-    logs/ \
+    data/logs/ \
     2>/dev/null || true
 
 ARCHIVE_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
 
-echo "✓ Archive created successfully"
+echo "Archive created successfully"
 echo ""
 echo "Archive: $OUTPUT_FILE"
 echo "Size: $ARCHIVE_SIZE"
@@ -48,5 +48,5 @@ echo ""
 echo "This will restore:"
 echo "  - data/chroma_db/          (vector database)"
 echo "  - data/processed/          (chunked documents)"
-echo "  - logs/                    (execution logs)"
+echo "  - data/logs/               (execution logs)"
 echo ""
