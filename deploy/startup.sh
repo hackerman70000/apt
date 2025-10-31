@@ -72,30 +72,11 @@ fi
 echo ""
 
 echo "Step 4: Setting up Python environment..."
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.cargo/bin:$PATH"
 
-if [ -n "$SUDO_USER" ]; then
-    ACTUAL_HOME=$(eval echo ~$SUDO_USER)
-
-    if ! sudo -u $SUDO_USER command -v uv &> /dev/null; then
-        sudo -u $SUDO_USER bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh' > /dev/null 2>&1
-        echo "uv installed for $SUDO_USER"
-    fi
-
-    echo "Installing Python dependencies..."
-    sudo -u $SUDO_USER bash -c "source $ACTUAL_HOME/.cargo/env && cd $WORKSPACE_DIR && uv sync"
-else
-    if ! command -v uv &> /dev/null; then
-        curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1
-        echo "uv installed"
-    fi
-
-    export PATH="$HOME/.cargo/bin:$PATH"
-    source "$HOME/.cargo/env" 2>/dev/null || true
-
-    echo "Installing Python dependencies..."
-    uv sync
-fi
-
+echo "Installing Python dependencies..."
+"$HOME/.cargo/bin/uv" sync
 echo "Python environment ready"
 echo ""
 
